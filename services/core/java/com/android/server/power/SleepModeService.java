@@ -69,7 +69,6 @@ public class SleepModeService extends SystemService {
     private static final int MODE_MIXED_SUNRISE = 4;
 
     private final SleepModeController mSleepModeController;
-    private final SleepModeIdleController mSleepModeIdleController;
     private final AlarmManager mAlarmManager;
     private final Context mContext;
     private final Handler mHandler = new Handler(Looper.getMainLooper());
@@ -85,14 +84,6 @@ public class SleepModeService extends SystemService {
      * Whether Sleep Mode is currently activated by the service
      */
     private boolean mActive = false;
-    /**
-     * Whether Sleep Mode is currently enabled for the active user
-     */
-    private boolean mSleepModeEnabled = false;
-    /**
-     * Whether Sleep Mode should reduce background activity
-     */
-    private boolean mIdleModeEnabled = false;
     /**
      * Whether next alarm should enable or disable Sleep Mode
      */
@@ -180,28 +171,11 @@ public class SleepModeService extends SystemService {
             resolver.registerContentObserver(Settings.Secure.getUriFor(
                     Settings.Secure.SLEEP_MODE_AUTO_TIME),
                     false, this, UserHandle.USER_ALL);
-            resolver.registerContentObserver(Settings.Secure.getUriFor(
-                    Settings.Secure.SLEEP_MODE_ENABLED),
-                    false, this, UserHandle.USER_ALL);
-            resolver.registerContentObserver(Settings.Secure.getUriFor(
-                    Settings.Secure.SLEEP_MODE_IDLE_TOGGLE),
-                    false, this, UserHandle.USER_ALL);
         }
 
         @Override
         public void onChange(boolean selfChange, Uri uri) {
-            mHandler.post(() -> {
-                if (uri == null
-                        || Settings.Secure.getUriFor(Settings.Secure.SLEEP_MODE_AUTO_MODE)
-                                .equals(uri)
-                        || Settings.Secure.getUriFor(Settings.Secure.SLEEP_MODE_AUTO_TIME)
-                                .equals(uri)) {
-                    initState();
-                    return;
-                }
-                syncSleepModeState();
-                syncIdleModeState();
-            });
+            mHandler.post(() -> initState());
         }
     }
 
@@ -213,7 +187,6 @@ public class SleepModeService extends SystemService {
         mAlarmManager = (AlarmManager) mContext.getSystemService(Context.ALARM_SERVICE);
         mSettingsObserver = new SettingsObserver(mHandler);
         mSleepModeController = new SleepModeController(mContext);
-        mSleepModeIdleController = new SleepModeIdleController(mContext);
     }
 
     @Override
@@ -230,10 +203,7 @@ public class SleepModeService extends SystemService {
             mTwilightManager = getLocalService(TwilightManager.class);
         } else if (phase == SystemService.PHASE_BOOT_COMPLETED) {
             Slog.v(TAG, "onBootPhase PHASE_BOOT_COMPLETED");
-            mHandler.post(() -> {
-                initState();
-                syncIdleModeState(true);
-            });
+            mHandler.post(() -> initState());
         }
     }
 
@@ -293,10 +263,7 @@ public class SleepModeService extends SystemService {
         switch (mMode) {
             default:
             case MODE_DISABLED:
-                setTimeReciever(false);
-                setTwilightListener(false);
-                setAutoSleepModeActive(false);
-                syncSleepModeState();
+                if (pMode != MODE_DISABLED) setAutoSleepModeActive(false);
                 return;
             case MODE_TIME:
                 if (pMode == MODE_TIME) break;
@@ -445,42 +412,10 @@ public class SleepModeService extends SystemService {
      * @param active Whether to enable or disable Sleep Mode
      */
     private void setAutoSleepModeActive(boolean active) {
-        final boolean currentActive = isSleepModeEnabled();
-        mActive = currentActive;
-        if (currentActive == active) return;
+        if (mActive == active) return;
         mActive = active;
         Slog.v(TAG, "setAutoSleepModeActive: active=" + active);
         Settings.Secure.putIntForUser(mContext.getContentResolver(),
                 Settings.Secure.SLEEP_MODE_ENABLED, active ? 1 : 0, UserHandle.USER_CURRENT);
-    }
-
-    private boolean isSleepModeEnabled() {
-        return Settings.Secure.getIntForUser(mContext.getContentResolver(),
-                Settings.Secure.SLEEP_MODE_ENABLED, 0, UserHandle.USER_CURRENT) == 1;
-    }
-
-    private boolean isIdleModeEnabled() {
-        return Settings.Secure.getIntForUser(mContext.getContentResolver(),
-                Settings.Secure.SLEEP_MODE_IDLE_TOGGLE, 0, UserHandle.USER_CURRENT) == 1;
-    }
-
-    private void syncSleepModeState() {
-        mActive = isSleepModeEnabled();
-    }
-
-    private void syncIdleModeState() {
-        syncIdleModeState(false);
-    }
-
-    private void syncIdleModeState(boolean force) {
-        final boolean sleepModeEnabled = isSleepModeEnabled();
-        final boolean idleModeEnabled = isIdleModeEnabled();
-        if (!force && mSleepModeEnabled == sleepModeEnabled
-                && mIdleModeEnabled == idleModeEnabled) {
-            return;
-        }
-        mSleepModeEnabled = sleepModeEnabled;
-        mIdleModeEnabled = idleModeEnabled;
-        mSleepModeIdleController.setDeepSleepEnabled(mSleepModeEnabled && mIdleModeEnabled);
     }
 }
