@@ -202,8 +202,7 @@ public final class PlayIntegritySpoofService {
         try {
             content = am.getSpoofPifConfig();
             String spoofPhotos = am.getSpoofPifSpoofPhotos();
-            mSpoofPhotos = spoofPhotos == null || "1".equals(spoofPhotos)
-                            || "true".equalsIgnoreCase(spoofPhotos);
+            mSpoofPhotos = "1".equals(spoofPhotos) || "true".equalsIgnoreCase(spoofPhotos);
 
             String spoofProps = am.getSpoofPifSpoofProps();
             mSpoofProps = spoofProps == null || "1".equals(spoofProps)
