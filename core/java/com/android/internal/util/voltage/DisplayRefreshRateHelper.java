@@ -22,6 +22,7 @@ import java.util.Comparator;
 public class DisplayRefreshRateHelper {
 
     private static final float DEFAULT_REFRESH_RATE = 60f;
+    private static final int MIN_LTPO_REFRESH_RATE = 1;
 
     private static DisplayRefreshRateHelper sInstance = null;
 
@@ -62,10 +63,10 @@ public class DisplayRefreshRateHelper {
         final float defaultRefreshRate = refreshRate != 0 ? (float) refreshRate : DEFAULT_REFRESH_RATE;
         final int ret = (int) Settings.System.getFloatForUser(mContext.getContentResolver(),
                 MIN_REFRESH_RATE, defaultRefreshRate, UserHandle.USER_SYSTEM);
-        if (mRefreshRateList.size() != 0 && !mRefreshRateList.contains(ret)) {
-            return mRefreshRateList.get(mRefreshRateList.size() - 1);
+        if (ret >= MIN_LTPO_REFRESH_RATE) {
+            return ret;
         }
-        return ret;
+        return (int) defaultRefreshRate;
     }
 
     public int getPeakRefreshRate() {
@@ -74,10 +75,10 @@ public class DisplayRefreshRateHelper {
         final float defaultPeakRefreshRate = refreshRate != 0 ? (float) refreshRate : DEFAULT_REFRESH_RATE;
         final int ret = (int) Settings.System.getFloatForUser(mContext.getContentResolver(),
                 PEAK_REFRESH_RATE, defaultPeakRefreshRate, UserHandle.USER_SYSTEM);
-        if (mRefreshRateList.size() != 0 && !mRefreshRateList.contains(ret)) {
-            return mRefreshRateList.get(mRefreshRateList.size() - 1);
+        if (ret >= MIN_LTPO_REFRESH_RATE) {
+            return ret;
         }
-        return ret;
+        return (int) defaultPeakRefreshRate;
     }
 
     public ArrayList<Integer> getRefreshRate() {
@@ -103,6 +104,18 @@ public class DisplayRefreshRateHelper {
     }
 
     public boolean isRefreshRateValid(int refreshRate) {
-        return mRefreshRateList.contains(refreshRate);
+        if (refreshRate <= 0) {
+            return false;
+        }
+        if (mRefreshRateList.contains(refreshRate)) {
+            return true;
+        }
+        if (mRefreshRateList.isEmpty()) {
+            return refreshRate >= MIN_LTPO_REFRESH_RATE;
+        }
+
+        // Allow LTPO floor values that are below panel mode list (e.g. 1/5/10/15 on 60/90/120).
+        final int panelMaxRefreshRate = mRefreshRateList.get(mRefreshRateList.size() - 1);
+        return refreshRate >= MIN_LTPO_REFRESH_RATE && refreshRate <= panelMaxRefreshRate;
     }
 }

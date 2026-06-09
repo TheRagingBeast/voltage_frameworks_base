@@ -3043,7 +3043,12 @@ public class DisplayModeDirector {
         public void onRequestedRefreshRate(int refreshRate) {
             final Vote vote;
             if (refreshRate > 0) {
-                vote = Vote.forRenderFrameRates((float) refreshRate, (float) refreshRate);
+                final float peakRefreshRate = Settings.System.getFloatForUser(
+                        mContext.getContentResolver(), Settings.System.PEAK_REFRESH_RATE,
+                        mContext.getResources().getInteger(R.integer.config_defaultPeakRefreshRate),
+                        UserHandle.USER_CURRENT);
+                vote = Vote.forRenderFrameRates((float) refreshRate,
+                        Math.max((float) refreshRate, peakRefreshRate));
             } else {
                 vote = null;
             }
