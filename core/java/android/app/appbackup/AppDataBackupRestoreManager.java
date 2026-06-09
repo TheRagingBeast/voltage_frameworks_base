@@ -1,0 +1,242 @@
+/*
+ * Copyright (C) 2026 VoltageOS
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package android.app.appbackup;
+
+import android.annotation.NonNull;
+import android.annotation.Nullable;
+import android.annotation.RequiresPermission;
+import android.annotation.SystemService;
+import android.content.Context;
+import android.os.RemoteException;
+import android.os.ServiceManager;
+import android.util.Log;
+
+import java.util.Collections;
+import java.util.List;
+
+/**
+ *
+ * @hide
+ */
+@SystemService(Context.APP_DATA_BACKUP_SERVICE)
+public class AppDataBackupRestoreManager {
+
+    private static final String TAG = "AppDataBackupMgr";
+
+    public static final String SERVICE_NAME = "app_data_backup";
+
+    /** Back up the APK(s): base + split APKs. */
+    public static final int COMPONENT_APK = 1;
+    /**
+     * Back up app data. CE and DE are always archived together into a single
+     * backup.tar (ce/ + de/ subtrees) via installd; setting either flag enables
+     * the data archive. COMPONENT_EXTERNAL is not supported — external storage
+     * data is not backed up by this service.
+     */
+    public static final int COMPONENT_CE_DATA = 1 << 1;
+    /** Alias for {@link #COMPONENT_CE_DATA}; CE and DE are always combined. */
+    public static final int COMPONENT_DE_DATA = 1 << 2;
+    /** Convenience mask selecting every supported component. */
+    public static final int COMPONENT_ALL = COMPONENT_APK | COMPONENT_CE_DATA | COMPONENT_DE_DATA;
+
+    private final IAppDataBackupService mService;
+    private final int mUserId;
+
+    /** @hide */
+    public AppDataBackupRestoreManager(Context context, IAppDataBackupService service) {
+        mService = service;
+        mUserId = context.getUserId();
+    }
+
+    private static IAppDataBackupService getService() {
+        return IAppDataBackupService.Stub.asInterface(
+                ServiceManager.getService(SERVICE_NAME));
+    }
+
+    @RequiresPermission(android.Manifest.permission.APP_DATA_BACKUP)
+    @NonNull
+    public List<AppBackupInfo> getInstalledApps() {
+        try {
+            List<AppBackupInfo> result = mService.getInstalledApps(mUserId);
+            return result != null ? result : Collections.emptyList();
+        } catch (RemoteException e) {
+            Log.e(TAG, "getInstalledApps failed", e);
+            return Collections.emptyList();
+        }
+    }
+
+    @RequiresPermission(android.Manifest.permission.APP_DATA_BACKUP)
+    @NonNull
+    public List<BackupRecord> getAvailableBackups(@NonNull String backupDir) {
+        try {
+            List<BackupRecord> result = mService.getAvailableBackups(backupDir, mUserId);
+            return result != null ? result : Collections.emptyList();
+        } catch (RemoteException e) {
+            Log.e(TAG, "getAvailableBackups failed", e);
+            return Collections.emptyList();
+        }
+    }
+
+    @RequiresPermission(android.Manifest.permission.APP_DATA_BACKUP)
+    @NonNull
+    public String backupPackages(@NonNull List<String> packageNames,
+            @NonNull String backupDir,
+            boolean excludeCache,
+            @Nullable IBackupProgressCallback callback,
+            @Nullable String passphrase,
+            int components,
+            int keepVersions) {
+        try {
+            return mService.backupPackages(packageNames, backupDir, excludeCache,
+                    mUserId, callback, passphrase, components, keepVersions);
+        } catch (RemoteException e) {
+            Log.e(TAG, "backupPackages failed", e);
+            return "";
+        }
+    }
+
+    @RequiresPermission(android.Manifest.permission.APP_DATA_RESTORE)
+    @NonNull
+    public String restorePackages(@NonNull List<String> backupIds,
+            @NonNull String backupDir,
+            @Nullable IRestoreProgressCallback callback,
+            @Nullable String passphrase) {
+        try {
+            return mService.restorePackages(backupIds, backupDir, mUserId, callback, passphrase);
+        } catch (RemoteException e) {
+            Log.e(TAG, "restorePackages failed", e);
+            return "";
+        }
+    }
+
+    @RequiresPermission(anyOf = {
+            android.Manifest.permission.APP_DATA_BACKUP,
+            android.Manifest.permission.APP_DATA_RESTORE
+    })
+    public void cancelOperation(@NonNull String operationToken) {
+        try {
+            mService.cancelOperation(operationToken);
+        } catch (RemoteException e) {
+            Log.e(TAG, "cancelOperation failed", e);
+        }
+    }
+
+    @RequiresPermission(android.Manifest.permission.APP_DATA_BACKUP)
+    public boolean deleteBackup(@NonNull String backupId, @NonNull String backupDir) {
+        try {
+            return mService.deleteBackup(backupId, backupDir);
+        } catch (RemoteException e) {
+            Log.e(TAG, "deleteBackup failed", e);
+            return false;
+        }
+    }
+
+    @RequiresPermission(android.Manifest.permission.APP_DATA_BACKUP)
+    @Nullable
+    public BackupRecord getBackupRecord(@NonNull String backupId, @NonNull String backupDir) {
+        try {
+            return mService.getBackupRecord(backupId, backupDir);
+        } catch (RemoteException e) {
+            Log.e(TAG, "getBackupRecord failed", e);
+            return null;
+        }
+    }
+
+    @RequiresPermission(android.Manifest.permission.APP_DATA_BACKUP)
+    public boolean isEncryptionAvailable() {
+        try {
+            return mService.isEncryptionAvailable(mUserId);
+        } catch (RemoteException e) {
+            Log.e(TAG, "isEncryptionAvailable failed", e);
+            return false;
+        }
+    }
+
+    /**
+     * Verifies that a stored backup decrypts, decompresses and matches its stored
+     * per-entry checksums.
+     *
+     * @return {@code null} if the backup is valid, otherwise a human-readable
+     *         description of the failure.
+     */
+    @RequiresPermission(android.Manifest.permission.APP_DATA_BACKUP)
+    @Nullable
+    public String verifyBackup(@NonNull String backupId, @NonNull String backupDir,
+            @Nullable String passphrase) {
+        try {
+            return mService.verifyBackup(backupId, backupDir, mUserId, passphrase);
+        } catch (RemoteException e) {
+            Log.e(TAG, "verifyBackup failed", e);
+            return "Verification failed: " + e.getMessage();
+        }
+    }
+
+    /**
+     * Export the raw backup.tar for {@code packageName} from internal secure
+     * storage (/data/misc_ce) to {@code destPath} (e.g. /sdcard/Backups/pkg.tar).
+     * The service opens the destination file; installd reads from misc_ce and
+     * writes to that fd — neither component needs broad /sdcard access.
+     *
+     * @throws RuntimeException if the export fails
+     */
+    @RequiresPermission(android.Manifest.permission.APP_DATA_BACKUP)
+    public void exportAppBackup(@NonNull String packageName, @NonNull String destPath) {
+        try {
+            mService.exportAppBackup(packageName, mUserId, destPath);
+        } catch (RemoteException e) {
+            throw new RuntimeException("exportAppBackup failed for " + packageName, e);
+        }
+    }
+
+    /**
+     * Import a raw backup.tar from {@code srcPath} (e.g. /sdcard/Backups/pkg.tar)
+     * into internal secure storage for later restoration via
+     * {@link #restorePackages}.  The service opens the source file; installd
+     * writes to misc_ce and never touches /sdcard paths directly.
+     *
+     * @throws RuntimeException if the import fails
+     */
+    @RequiresPermission(android.Manifest.permission.APP_DATA_BACKUP)
+    public void importAppBackup(@NonNull String packageName, @NonNull String srcPath) {
+        try {
+            mService.importAppBackup(packageName, mUserId, srcPath);
+        } catch (RemoteException e) {
+            throw new RuntimeException("importAppBackup failed for " + packageName, e);
+        }
+    }
+
+    /**
+     * Import a raw backup.tar from {@code srcPath} and immediately restore it
+     * into the app's live CE+DE data directories. The APK must already be
+     * installed on the device. This is the primary path for restoring a backup
+     * after a clean flash.
+     *
+     * @return a {@link BackupResult} — check {@link BackupResult#isSuccess()}
+     */
+    @RequiresPermission(android.Manifest.permission.APP_DATA_RESTORE)
+    @NonNull
+    public BackupResult importAndRestore(@NonNull String packageName, @NonNull String srcPath) {
+        try {
+            final BackupResult result = mService.importAndRestore(packageName, mUserId, srcPath);
+            return result != null ? result : BackupResult.failure(BackupResult.ERROR_IO,
+                    "Null result from service");
+        } catch (RemoteException e) {
+            return BackupResult.failure(BackupResult.ERROR_IO,
+                    "importAndRestore failed: " + e.getMessage());
+        }
+    }
+}
