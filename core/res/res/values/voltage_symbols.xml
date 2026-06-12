@@ -122,9 +122,6 @@
     <!-- Lock gesture -->
     <java-symbol type="string" name="gesture_locked_warning" />
 
-    <!-- GameSpace -->
-    <java-symbol type="string" name="gamespace_new_game_added" />
-
     <!-- LiveDisplay -->
     <java-symbol type="string" name="live_display_title" />
     <java-symbol type="string" name="live_display_hint" />

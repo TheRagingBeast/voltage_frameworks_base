@@ -1,6 +1,5 @@
 /*
  * Copyright (C) 2025 the AxionAOSP Project
- *           (C) 2025 crDroid Android Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,6 +15,9 @@
  */
 package com.android.server;
 
+import android.app.Notification;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
 import android.content.BroadcastReceiver;
 import android.content.ContentResolver;
 import android.content.Context;
@@ -25,47 +27,32 @@ import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.database.ContentObserver;
 import android.os.Handler;
-import android.os.HandlerThread;
 import android.os.UserHandle;
 import android.provider.Settings;
-import android.widget.Toast;
-
-import com.android.internal.R;
 import com.android.server.SystemService;
-import com.android.server.UiThread;
 
-import java.util.HashMap;
+import java.util.Arrays;
 import java.util.HashSet;
-import java.util.Map;
 import java.util.Set;
 
 public class GameSpaceManagerService extends SystemService {
-
     private static final String TAG = "GameSpaceManagerService";
-    private static final String GAME_LIST_SETTING = Settings.System.GAMESPACE_GAME_LIST;
-    private static final Set<String> VALID_MODES = Set.of("1", "2", "3");
+    private static final String GAME_LIST_SETTING = "gamespace_game_list";
+    private static final String NOTIFICATION_CHANNEL_ID = "gamespace_notif_channel";
 
     private final Context mContext;
+    private final Handler mHandler = new Handler();
     private final PackageManager mPackageManager;
-    private final Handler mBackgroundHandler;
-    private final BroadcastReceiver mPackageChangeReceiver = new PackageChangeReceiver();
-    private final ContentObserver mGameListObserver;
 
     public GameSpaceManagerService(Context context) {
         super(context);
         mContext = context;
         mPackageManager = context.getPackageManager();
-
-        HandlerThread handlerThread = new HandlerThread("GameSpaceManagerThread");
-        handlerThread.start();
-        mBackgroundHandler = new Handler(handlerThread.getLooper());
-
-        mGameListObserver = new GameListObserver(mBackgroundHandler);
     }
 
     @Override
     public void onStart() {
-        // No-op
+        createNotificationChannel();
     }
 
     @Override
@@ -75,11 +62,14 @@ public class GameSpaceManagerService extends SystemService {
             filter.addAction(Intent.ACTION_PACKAGE_ADDED);
             filter.addAction(Intent.ACTION_PACKAGE_FULLY_REMOVED);
             filter.addDataScheme("package");
-            mContext.registerReceiver(mPackageChangeReceiver, filter);
+            mContext.registerReceiver(new PackageChangeReceiver(), filter);
 
-            mContext.getContentResolver().registerContentObserver(
-                Settings.System.getUriFor(GAME_LIST_SETTING), false,
-                mGameListObserver, UserHandle.USER_ALL);
+            ContentResolver cr = mContext.getContentResolver();
+            cr.registerContentObserver(
+                Settings.System.getUriFor(GAME_LIST_SETTING),
+                false,
+                new GameListObserver(mHandler)
+            );
 
             sanitizeGameList();
         }
@@ -91,13 +81,11 @@ public class GameSpaceManagerService extends SystemService {
             String packageName = intent.getData().getSchemeSpecificPart();
             if (packageName == null) return;
 
-            mBackgroundHandler.post(() -> {
-                if (Intent.ACTION_PACKAGE_ADDED.equals(intent.getAction())) {
-                    handlePackageAdded(packageName);
-                } else if (Intent.ACTION_PACKAGE_FULLY_REMOVED.equals(intent.getAction())) {
-                    handlePackageRemoved(packageName);
-                }
-            });
+            if (Intent.ACTION_PACKAGE_ADDED.equals(intent.getAction())) {
+                handlePackageAdded(packageName);
+            } else if (Intent.ACTION_PACKAGE_FULLY_REMOVED.equals(intent.getAction())) {
+                handlePackageRemoved(packageName);
+            }
         }
     }
 
@@ -114,7 +102,7 @@ public class GameSpaceManagerService extends SystemService {
     private boolean isGame(String packageName) {
         try {
             ApplicationInfo appInfo = mPackageManager.getApplicationInfo(packageName, PackageManager.GET_META_DATA);
-            return appInfo != null && appInfo.category == ApplicationInfo.CATEGORY_GAME;
+            return (appInfo.category == ApplicationInfo.CATEGORY_GAME);
         } catch (PackageManager.NameNotFoundException e) {
             return false;
         }
@@ -122,77 +110,78 @@ public class GameSpaceManagerService extends SystemService {
 
     private void addToGameSpace(String packageName) {
         ContentResolver cr = mContext.getContentResolver();
-        String currentList = Settings.System.getStringForUser(cr, GAME_LIST_SETTING, UserHandle.USER_CURRENT);
-        Map<String, String> gameMap = new HashMap<>();
+        String currentList = Settings.System.getString(cr, GAME_LIST_SETTING);
+        Set<String> updatedSet = new HashSet<>();
+        boolean alreadyExists = false;
 
         if (currentList != null && !currentList.isEmpty()) {
             String[] entries = currentList.split(";");
             for (String entry : entries) {
                 String[] parts = entry.split("=");
                 if (parts.length == 2 && isValidMode(parts[1])) {
-                    gameMap.put(parts[0], parts[1]);
+                    if (parts[0].equals(packageName)) {
+                        alreadyExists = true;
+                    }
+                    updatedSet.add(parts[0] + "=" + parts[1]);
                 }
             }
         }
 
-        if (!gameMap.containsKey(packageName)) {
-            gameMap.put(packageName, "2");
-            String updatedList = serializeGameMap(gameMap);
-            Settings.System.putStringForUser(cr, GAME_LIST_SETTING, updatedList, UserHandle.USER_CURRENT);
+        if (!alreadyExists) {
+            updatedSet.add(packageName + "=2");
+            String updatedList = String.join(";", updatedSet);
+            Settings.System.putString(cr, GAME_LIST_SETTING, updatedList);
             sendGameAddedNotification(packageName);
         }
     }
 
     private void removeFromGameSpace(String packageName) {
         ContentResolver cr = mContext.getContentResolver();
-        String currentList = Settings.System.getStringForUser(cr, GAME_LIST_SETTING, UserHandle.USER_CURRENT);
+        String currentList = Settings.System.getString(cr, GAME_LIST_SETTING);
+
         if (currentList == null || currentList.isEmpty()) return;
 
-        Map<String, String> gameMap = new HashMap<>();
+        Set<String> updatedSet = new HashSet<>();
         String[] entries = currentList.split(";");
+
         for (String entry : entries) {
             String[] parts = entry.split("=");
-            if (parts.length == 2 && isValidMode(parts[1]) && !parts[0].equals(packageName)) {
-                gameMap.put(parts[0], parts[1]);
+            if (parts.length == 2 && isValidMode(parts[1])) {
+                if (!parts[0].equals(packageName)) {
+                    updatedSet.add(parts[0] + "=" + parts[1]);
+                }
             }
         }
 
-        String updatedList = serializeGameMap(gameMap);
-        Settings.System.putStringForUser(cr, GAME_LIST_SETTING, updatedList, UserHandle.USER_CURRENT);
+        String updatedList = String.join(";", updatedSet);
+        Settings.System.putString(cr, GAME_LIST_SETTING, updatedList);
     }
 
     private boolean isValidMode(String modeStr) {
-        return VALID_MODES.contains(modeStr);
+        return modeStr.equals("1") || modeStr.equals("2") || modeStr.equals("3");
     }
 
     private void sanitizeGameList() {
         ContentResolver cr = mContext.getContentResolver();
-        String currentList = Settings.System.getStringForUser(cr, GAME_LIST_SETTING, UserHandle.USER_CURRENT);
+        String currentList = Settings.System.getString(cr, GAME_LIST_SETTING);
         if (currentList == null || currentList.isEmpty()) return;
 
-        Map<String, String> gameMap = new HashMap<>();
+        Set<String> sanitizedSet = new HashSet<>();
         String[] entries = currentList.split(";");
+
         for (String entry : entries) {
             int firstEquals = entry.indexOf('=');
             if (firstEquals > 0 && firstEquals < entry.length() - 1) {
                 String key = entry.substring(0, firstEquals).trim();
                 String value = entry.substring(firstEquals + 1).split("[^0-9]", 2)[0].trim();
                 if (isValidMode(value)) {
-                    gameMap.put(key, value);
+                    sanitizedSet.add(key + "=" + value);
                 }
             }
         }
 
-        String sanitizedList = serializeGameMap(gameMap);
-        Settings.System.putStringForUser(cr, GAME_LIST_SETTING, sanitizedList, UserHandle.USER_CURRENT);
-    }
-
-    private String serializeGameMap(Map<String, String> gameMap) {
-        Set<String> result = new HashSet<>();
-        for (Map.Entry<String, String> entry : gameMap.entrySet()) {
-            result.add(entry.getKey() + "=" + entry.getValue());
-        }
-        return String.join(";", result);
+        String sanitizedList = String.join(";", sanitizedSet);
+        Settings.System.putString(cr, GAME_LIST_SETTING, sanitizedList);
     }
 
     private class GameListObserver extends ContentObserver {
@@ -207,22 +196,43 @@ public class GameSpaceManagerService extends SystemService {
         }
     }
 
+    private void createNotificationChannel() {
+        NotificationManager notificationManager =
+            (NotificationManager) mContext.getSystemService(Context.NOTIFICATION_SERVICE);
+
+        NotificationChannel channel = new NotificationChannel(
+            NOTIFICATION_CHANNEL_ID,
+            "GameSpace",
+            NotificationManager.IMPORTANCE_HIGH
+        );
+        channel.setDescription("GameSpace Notifications");
+        channel.enableVibration(true);
+        channel.enableLights(true);
+        notificationManager.createNotificationChannel(channel);
+    }
+
     private void sendGameAddedNotification(String packageName) {
         String appName;
         try {
             appName = mPackageManager.getApplicationLabel(
-                mPackageManager.getApplicationInfo(packageName, 0)).toString();
+                mPackageManager.getApplicationInfo(packageName, 0)
+            ).toString();
         } catch (PackageManager.NameNotFoundException e) {
             appName = packageName;
         }
-        final String finalAppName = appName;
 
-        UiThread.getHandler().post(
-            () -> Toast.makeText(
-                mContext,
-                mContext.getString(R.string.gamespace_new_game_added, finalAppName),
-                Toast.LENGTH_LONG
-            ).show()
-        );
+        NotificationManager notificationManager =
+            (NotificationManager) mContext.getSystemService(Context.NOTIFICATION_SERVICE);
+
+        Notification notification = new Notification.Builder(mContext, NOTIFICATION_CHANNEL_ID)
+            .setSmallIcon(android.R.mipmap.sym_def_app_icon)
+            .setContentTitle("GameSpace")
+            .setContentText(appName + " added to GameSpace")
+            .setPriority(Notification.PRIORITY_HIGH)
+            .setDefaults(Notification.DEFAULT_SOUND | Notification.DEFAULT_VIBRATE)
+            .setAutoCancel(true)
+            .build();
+
+        notificationManager.notify(packageName.hashCode(), notification);
     }
 }
