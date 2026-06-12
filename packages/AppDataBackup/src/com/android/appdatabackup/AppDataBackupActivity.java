@@ -83,7 +83,6 @@ public class AppDataBackupActivity extends Activity {
     private TabLayout mTabLayout;
     private ViewPager2 mViewPager;
     private FloatingActionButton mFab;
-    private FloatingActionButton mFabImport;
     private ProgressBar mProgressBar;
     private TextView mProgressText;
     private Switch mExcludeCacheSwitch;
@@ -110,7 +109,6 @@ public class AppDataBackupActivity extends Activity {
         mTabLayout = findViewById(R.id.tab_layout);
         mViewPager = findViewById(R.id.view_pager);
         mFab = findViewById(R.id.fab_backup);
-        mFabImport = findViewById(R.id.fab_import);
         mProgressBar = findViewById(R.id.progress_bar);
         mProgressText = findViewById(R.id.progress_text);
         mExcludeCacheSwitch = findViewById(R.id.switch_exclude_cache);
@@ -165,9 +163,7 @@ public class AppDataBackupActivity extends Activity {
         mViewPager.registerOnPageChangeCallback(new ViewPager2.OnPageChangeCallback() {
             @Override
             public void onPageSelected(int position) {
-                // Apps tab: show backup FAB. Backups tab: show import FAB.
                 mFab.setVisibility(position == 0 ? View.VISIBLE : View.GONE);
-                mFabImport.setVisibility(position == 1 ? View.VISIBLE : View.GONE);
             }
         });
     }
@@ -179,62 +175,6 @@ public class AppDataBackupActivity extends Activity {
                 return;
             }
             startBackup();
-        });
-        mFabImport.setOnClickListener(v -> startImport());
-    }
-
-    private void startImport() {
-        // Ask the user for the package name and the tar path on /sdcard to import.
-        final int pad = (int) (20 * getResources().getDisplayMetrics().density);
-        final LinearLayout layout = new LinearLayout(this);
-        layout.setOrientation(LinearLayout.VERTICAL);
-        layout.setPadding(pad, pad / 2, pad, 0);
-
-        final EditText pkgInput = new EditText(this);
-        pkgInput.setHint("Package name (e.g. com.whatsapp)");
-        layout.addView(pkgInput);
-
-        final EditText pathInput = new EditText(this);
-        pathInput.setHint("Path to backup.tar (e.g. /sdcard/AppDataBackup/com.whatsapp-backup.tar)");
-        layout.addView(pathInput);
-
-        new AlertDialog.Builder(this)
-                .setTitle("Restore from backup.tar")
-                .setMessage("Select a raw backup.tar to restore. The app must already be "
-                        + "installed. This will immediately overwrite the app's data.")
-                .setView(layout)
-                .setPositiveButton("Import", (d, w) -> {
-                    final String pkg  = pkgInput.getText() != null
-                            ? pkgInput.getText().toString().trim() : "";
-                    final String path = pathInput.getText() != null
-                            ? pathInput.getText().toString().trim() : "";
-                    if (pkg.isEmpty() || path.isEmpty()) {
-                        Toast.makeText(this, "Package name and path are required",
-                                Toast.LENGTH_SHORT).show();
-                        return;
-                    }
-                    doImport(pkg, path);
-                })
-                .setNegativeButton("Cancel", null)
-                .show();
-    }
-
-    private void doImport(String packageName, String tarPath) {
-        showProgress("Restoring " + packageName + " from tar...");
-        mExecutor.submit(() -> {
-            // importAndRestore: imports the raw tar into misc_ce staging and
-            // immediately restores it into the live app data dirs in one call.
-            // The APK must already be installed (or the user installs it first).
-            final android.app.appbackup.BackupResult result =
-                    mManager.importAndRestore(packageName, tarPath);
-            mMainHandler.post(() -> {
-                hideProgress();
-                Toast.makeText(this,
-                        result.isSuccess()
-                                ? "Restored " + packageName + " — relaunch the app"
-                                : "Restore failed: " + result.getMessage(),
-                        Toast.LENGTH_LONG).show();
-            });
         });
     }
 
@@ -516,7 +456,6 @@ public class AppDataBackupActivity extends Activity {
             mProgressText.setVisibility(View.VISIBLE);
             mProgressText.setText(message);
             mFab.setEnabled(false);
-            mFabImport.setEnabled(false);
         });
     }
 
@@ -528,7 +467,6 @@ public class AppDataBackupActivity extends Activity {
         mProgressBar.setVisibility(View.GONE);
         mProgressText.setVisibility(View.GONE);
         mFab.setEnabled(true);
-        mFabImport.setEnabled(true);
     }
 
     private final class AppListAdapter
@@ -598,7 +536,6 @@ public class AppDataBackupActivity extends Activity {
                     + "  •  " + formatBytes(record.getTotalSize()));
             holder.btnRestore.setOnClickListener(v -> startRestore(record));
             holder.btnDelete.setOnClickListener(v -> confirmDelete(record));
-            holder.btnExport.setOnClickListener(v -> doExport(record));
         }
 
         @Override
@@ -606,7 +543,7 @@ public class AppDataBackupActivity extends Activity {
 
         class ViewHolder extends RecyclerView.ViewHolder {
             TextView label, pkg, meta;
-            Button btnRestore, btnDelete, btnExport;
+            Button btnRestore, btnDelete;
             ViewHolder(View v) {
                 super(v);
                 label = v.findViewById(R.id.tv_label);
@@ -614,35 +551,7 @@ public class AppDataBackupActivity extends Activity {
                 meta = v.findViewById(R.id.tv_meta);
                 btnRestore = v.findViewById(R.id.btn_restore);
                 btnDelete = v.findViewById(R.id.btn_delete);
-                btnExport = v.findViewById(R.id.btn_export);
             }
-        }
-
-        private void doExport(BackupRecord record) {
-            // Export the raw backup.tar from internal staging (misc_ce) to
-            // /sdcard/AppDataBackup/<pkg>-backup.tar so the user can copy it
-            // off-device. This does not touch the .vbak archive.
-            final File exportFile = new File(mBackupDir,
-                    record.getPackageName() + "-backup.tar");
-            showProgress("Exporting " + record.getLabel() + "...");
-            mExecutor.submit(() -> {
-                try {
-                    mManager.exportAppBackup(record.getPackageName(), exportFile.getAbsolutePath());
-                    mMainHandler.post(() -> {
-                        hideProgress();
-                        Toast.makeText(AppDataBackupActivity.this,
-                                "Exported to " + exportFile.getAbsolutePath(),
-                                Toast.LENGTH_LONG).show();
-                    });
-                } catch (Exception e) {
-                    mMainHandler.post(() -> {
-                        hideProgress();
-                        Toast.makeText(AppDataBackupActivity.this,
-                                "Export failed: " + e.getMessage(),
-                                Toast.LENGTH_LONG).show();
-                    });
-                }
-            });
         }
 
         private void confirmDelete(BackupRecord record) {

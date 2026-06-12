@@ -32,8 +32,6 @@ import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.os.Binder;
 import android.os.RemoteException;
-import android.os.ResultReceiver;
-import android.os.ShellCallback;
 import android.os.UserHandle;
 import android.os.storage.StorageManager;
 import android.util.Log;
@@ -44,7 +42,6 @@ import com.android.server.pm.Installer;
 import com.android.server.pm.Installer.InstallerException;
 
 import java.io.File;
-import java.io.FileDescriptor;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -88,27 +85,6 @@ public class AppDataBackupService extends SystemService {
 
     final class BinderService extends IAppDataBackupService.Stub {
 
-        @Override
-        public void onShellCommand(FileDescriptor in, FileDescriptor out,
-                FileDescriptor err, String[] args, ShellCallback callback,
-                ResultReceiver resultReceiver) {
-            enforceShellOrRoot();
-            new AppDataBackupShellCommand(this).exec(
-                    this,
-                    in,
-                    out,
-                    err,
-                    args,
-                    callback,
-                    resultReceiver);
-        }
-
-        private void enforceShellOrRoot() {
-            final int uid = Binder.getCallingUid();
-            if (uid != android.os.Process.SHELL_UID && uid != android.os.Process.ROOT_UID) {
-                throw new SecurityException("Shell commands only available to shell/root");
-            }
-        }
 
         @Override
         public List<AppBackupInfo> getInstalledApps(int userId) {
@@ -228,87 +204,6 @@ public class AppDataBackupService extends SystemService {
         @Override
         public boolean isEncryptionAvailable(int userId) {
             return true;
-        }
-
-        @Override
-        public void exportAppBackup(String packageName, int userId, String destPath) {
-            enforceBackupPermission();
-            final long ident = Binder.clearCallingIdentity();
-            try {
-                // installd reads from misc_ce and writes directly to
-                // /data/media/<userId>/AppDataBackup/<pkg>-backup.tar.
-                // system_server never opens any /data/media file for writing.
-                mInstaller.exportAppBackupToMedia(packageName, userId);
-            } catch (InstallerException e) {
-                throw new RuntimeException("exportAppBackup failed for " + packageName, e);
-            } finally {
-                Binder.restoreCallingIdentity(ident);
-            }
-        }
-
-        @Override
-        public void importAppBackup(String packageName, int userId, String srcPath) {
-            enforceBackupPermission();
-            final long ident = Binder.clearCallingIdentity();
-            try {
-                final File src = resolveFilePath(srcPath, userId);
-                try (android.os.ParcelFileDescriptor pfd = android.os.ParcelFileDescriptor.open(
-                        src,
-                        android.os.ParcelFileDescriptor.MODE_READ_ONLY)) {
-                    mInstaller.importAppBackup(packageName, userId, pfd);
-                } catch (InstallerException e) {
-                    throw new RuntimeException("importAppBackup failed for " + packageName, e);
-                }
-            } catch (java.io.IOException e) {
-                throw new RuntimeException("importAppBackup I/O error for " + packageName, e);
-            } finally {
-                Binder.restoreCallingIdentity(ident);
-            }
-        }
-
-        @Override
-        public BackupResult importAndRestore(String packageName, int userId, String srcPath) {
-            enforceRestorePermission();
-            final long ident = Binder.clearCallingIdentity();
-            try {
-                // 1. Import the tar into misc_ce staging.
-                final File src = resolveFilePath(srcPath, userId);
-                try (android.os.ParcelFileDescriptor pfd = android.os.ParcelFileDescriptor.open(
-                        src, android.os.ParcelFileDescriptor.MODE_READ_ONLY)) {
-                    mInstaller.importAppBackup(packageName, userId, pfd);
-                } catch (InstallerException | java.io.IOException e) {
-                    return BackupResult.failure(BackupResult.ERROR_IO,
-                            "Import failed: " + e.getMessage());
-                }
-
-                // 2. Look up appId + seInfo for the installed package.
-                final int appId;
-                final String seInfo;
-                try {
-                    final android.content.pm.PackageInfo pi =
-                            getContext().getPackageManager()
-                                    .getPackageInfoAsUser(packageName, 0, userId);
-                    appId = android.os.UserHandle.getAppId(pi.applicationInfo.uid);
-                    seInfo = pi.applicationInfo.seInfo != null
-                            ? pi.applicationInfo.seInfo : "default";
-                } catch (android.content.pm.PackageManager.NameNotFoundException e) {
-                    return BackupResult.failure(BackupResult.ERROR_PACKAGE_NOT_FOUND,
-                            "Package not installed: " + packageName);
-                }
-
-                // 3. Restore directly from the misc_ce tar via installd.
-                //    installd opens the tar itself — system_server passes no fd.
-                try {
-                    mInstaller.restoreAppDataFromBackup(null, packageName, userId, appId, seInfo);
-                } catch (InstallerException e) {
-                    return BackupResult.failure(BackupResult.ERROR_IO,
-                            "Restore failed: " + e.getMessage());
-                }
-
-                return BackupResult.ok();
-            } finally {
-                Binder.restoreCallingIdentity(ident);
-            }
         }
 
         @Override
@@ -656,12 +551,4 @@ public class AppDataBackupService extends SystemService {
         return new File(backupDir);
     }
 
-    // Like resolveBackupDirectory but for a full file path (not just a directory).
-    // Translates /sdcard/foo/bar.tar → /data/media/<userId>/foo/bar.tar
-    private static File resolveFilePath(@NonNull String filePath, int userId) {
-        final File f = new File(filePath);
-        final File resolvedParent = resolveBackupDirectory(f.getParent() != null
-                ? f.getParent() : "/sdcard", userId);
-        return new File(resolvedParent, f.getName());
-    }
 }

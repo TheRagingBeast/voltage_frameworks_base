@@ -753,56 +753,9 @@ public class Installer extends SystemService {
     }
 
     /**
-     * Copies the stored backup.tar from
-     * {@code /data/misc_ce/<userId>/app_backup/<pkg>/backup.tar} to {@code outFd}.
-     * The caller holds an fd pointing to a destination file on /sdcard.
-     */
-    public void exportAppBackup(String packageName, int userId,
-            ParcelFileDescriptor outFd) throws InstallerException {
-        if (!checkBeforeRemote()) return;
-        try {
-            mInstalld.exportAppBackup(null, packageName, userId, outFd);
-        } catch (Exception e) {
-            throw InstallerException.from(e);
-        }
-    }
-
     /**
-     * Copies the stored backup.tar from misc_ce directly to
-     * /data/media/{@code userId}/AppDataBackup/{@code packageName}-backup.tar.
-     * installd owns both opens; system_server needs no media_rw_data_file write.
-     */
-    public void exportAppBackupToMedia(String packageName, int userId)
-            throws InstallerException {
-        if (!checkBeforeRemote()) return;
-        try {
-            mInstalld.exportAppBackupToMedia(null, packageName, userId);
-        } catch (Exception e) {
-            throw InstallerException.from(e);
-        }
-    }
-
-    /**
-     * Stores a backup.tar from {@code inFd} into
-     * {@code /data/misc_ce/<userId>/app_backup/<pkg>/backup.tar}.
-     * The caller holds an fd pointing to the source file on /sdcard.
-     */
-    public void importAppBackup(String packageName, int userId,
-            ParcelFileDescriptor inFd) throws InstallerException {
-        if (!checkBeforeRemote()) return;
-        try {
-            mInstalld.importAppBackup(null, packageName, userId, inFd);
-        } catch (Exception e) {
-            throw InstallerException.from(e);
-        }
-    }
-
-    /**
-     * Reads the fully assembled .vbak archive from {@code inFd} and writes it
-     * to /data/media/{@code userId}/AppDataBackup/{@code archiveId}.vbak.
-     * system_server opens the staged file and passes the fd here; installd
-     * performs the actual write to /data/media so system_server needs no
-     * media_rw_data_file write permission.
+     * Reads a fully assembled .vbak archive from {@code inFd} and writes it to
+     * /data/media/{@code userId}/AppDataBackup/{@code archiveId}.vbak.
      */
     public void publishBackupArchive(int userId, String archiveId,
             ParcelFileDescriptor inFd) throws InstallerException {
@@ -815,23 +768,7 @@ public class Installer extends SystemService {
     }
 
     /**
-     * Restores CE+DE app data from
-     * /data/misc_ce/{@code userId}/app_backup/{@code packageName}/backup.tar.
-     * installd opens the tar itself; no fd crossing is needed.
-     */
-    public void restoreAppDataFromBackup(String uuid, String packageName,
-            int userId, int appId, String seInfo) throws InstallerException {
-        if (!checkBeforeRemote()) return;
-        try {
-            mInstalld.restoreAppDataFromBackup(uuid, packageName, userId, appId, seInfo);
-        } catch (Exception e) {
-            throw InstallerException.from(e);
-        }
-    }
-
-    /**
      * Deletes /data/media/{@code userId}/AppDataBackup/{@code archiveId}.vbak.
-     * installd owns the unlink; system_server needs no media_rw_data_file unlink.
      */
     public void deleteBackupArchive(int userId, String archiveId) throws InstallerException {
         if (!checkBeforeRemote()) return;

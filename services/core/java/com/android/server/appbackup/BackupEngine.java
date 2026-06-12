@@ -196,8 +196,9 @@ public class BackupEngine {
             BackupArchive.write(stagedVbak, manifest.toJson(), entryFiles, passphrase);
             deleteRecursive(tmpDir);
 
-            // Hand off to installd which copies from the staging fd to /data/media.
-            // system_server never touches /data/media directly.
+            // Pass the staged .vbak fd directly to installd for publishing to /data/media.
+            // installd has system_data_file:file { read open } in SEPolicy so it can
+            // read from an fd opened by system_server on a /data/system path.
             try (ParcelFileDescriptor pfd = ParcelFileDescriptor.open(
                     stagedVbak, ParcelFileDescriptor.MODE_READ_ONLY)) {
                 mInstaller.publishBackupArchive(userId, backupId, pfd);
@@ -235,13 +236,15 @@ public class BackupEngine {
 
     private long tarAppDataViaInstalld(@NonNull String packageName, int userId,
             @NonNull File dest, boolean excludeCache) throws IOException {
+        // installd writes the tar directly into the staging file (app_backup_staging_file).
         try (ParcelFileDescriptor pfd = ParcelFileDescriptor.open(dest,
                 ParcelFileDescriptor.MODE_CREATE
                         | ParcelFileDescriptor.MODE_WRITE_ONLY
                         | ParcelFileDescriptor.MODE_TRUNCATE)) {
             mInstaller.tarAppData(packageName, userId, pfd, excludeCache);
         } catch (InstallerException e) {
-            throw new IOException("tarAppData failed for " + packageName, e);
+            throw new IOException("tarAppData failed for " + packageName + ": "
+                    + e.getMessage(), e);
         }
         final long size = dest.length();
         // A tar with only the two-block EOF marker (1024 bytes) contains no data.
@@ -249,6 +252,7 @@ public class BackupEngine {
             dest.delete();
             return 0;
         }
+
         return size;
     }
 

@@ -87,17 +87,6 @@
             android:contentDescription="Back up selected apps"
             app:srcCompat="@android:drawable/ic_menu_save" />
 
-        <!-- Shown on Backups tab: import a tar from internal storage -->
-        <com.google.android.material.floatingactionbutton.FloatingActionButton
-            android:id="@+id/fab_import"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_gravity="bottom|end"
-            android:layout_margin="16dp"
-            android:contentDescription="Import backup from storage"
-            android:visibility="gone"
-            app:srcCompat="@android:drawable/ic_menu_upload" />
-
     </FrameLayout>
 
 </LinearLayout>

@@ -349,8 +349,11 @@ final class AppMetadataBackup {
             throws IOException, XmlPullParserException {
         final List<Map<String, String>> settings = new ArrayList<>();
         try (InputStream in = new FileInputStream(file)) {
-            final XmlPullParser parser = Xml.newPullParser();
-            parser.setInput(in, StandardCharsets.UTF_8.name());
+            // settings_ssaid.xml is stored in Android Binary XML (ABX) format on
+            // Android 13+. Xml.resolvePullParser sniffs the magic bytes and returns
+            // a parser that handles both text XML and ABX — never use newPullParser()
+            // with a raw InputStream for system settings files.
+            final XmlPullParser parser = Xml.resolvePullParser(in);
             int type;
             while ((type = parser.next()) != XmlPullParser.END_DOCUMENT) {
                 if (type != XmlPullParser.START_TAG) {
@@ -375,10 +378,10 @@ final class AppMetadataBackup {
         FileOutputStream out = null;
         try {
             out = atomic.startWrite();
-            final XmlSerializer serializer = Xml.newSerializer();
-            serializer.setOutput(out, StandardCharsets.UTF_8.name());
-            serializer.setFeature(
-                    "http://xmlpull.org/v1/doc/features.html#indent-output", true);
+            // Use Xml.resolveSerializer so the output format matches what the
+            // system expects: ABX on Android 13+ (text XML on older releases).
+            // Writing text XML into a file the system reads as ABX would corrupt it.
+            final XmlSerializer serializer = Xml.resolveSerializer(out);
             serializer.startDocument(null, Boolean.TRUE);
             serializer.startTag(null, "settings");
             serializer.attribute(null, "version", "1");

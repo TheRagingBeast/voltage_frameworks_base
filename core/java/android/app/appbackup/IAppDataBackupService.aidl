@@ -57,27 +57,4 @@ interface IAppDataBackupService {
 
     String verifyBackup(String backupId, String backupDir, int userId, String passphrase);
 
-    /**
-     * Copy the stored backup.tar for {@code packageName} from
-     * /data/misc_ce/<userId>/app_backup/<pkg>/backup.tar to {@code destPath}
-     * on /sdcard (or any path the caller resolves).  The service opens the
-     * destination file and passes the fd to installd so installd never needs
-     * direct access to /sdcard paths.
-     */
-    void exportAppBackup(String packageName, int userId, String destPath);
-
-    /**
-     * Copy a backup.tar from {@code srcPath} (on /sdcard or elsewhere) into
-     * /data/misc_ce/<userId>/app_backup/<pkg>/backup.tar.  The service opens
-     * the source file and passes the fd to installd.
-     */
-    void importAppBackup(String packageName, int userId, String srcPath);
-
-    /**
-     * Import a raw backup.tar from {@code srcPath} and immediately restore it
-     * into the app's live CE+DE data directories. The APK must already be
-     * installed. Returns a {@link BackupResult} describing success or failure.
-     */
-    android.app.appbackup.BackupResult importAndRestore(String packageName,
-            int userId, String srcPath);
 }

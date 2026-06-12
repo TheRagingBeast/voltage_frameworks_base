@@ -178,6 +178,8 @@ public class RestoreEngine {
         }
 
         // Single backup.tar contains both CE (ce/) and DE (de/) trees.
+        // Pass the fd directly — installd has system_data_file:file { read open }
+        // so it can read from an fd opened by system_server on a /data/system path.
         final File dataArchive = new File(archiveDir, "backup.tar");
         if (dataArchive.exists()) {
             try (ParcelFileDescriptor pfd = ParcelFileDescriptor.open(dataArchive,
